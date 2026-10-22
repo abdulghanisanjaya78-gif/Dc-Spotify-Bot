@@ -6,6 +6,7 @@
 !stop — Berhenti + kosongin queue
 !leave — Bot cabut dari VC
 !queue — Lihat antrian
+💤 Standby otomatis: bot idle 2 menit di VC → muter standby playlist (loop). !play apa aja langsung matiin standby + ganti lagu.
 !lirik — Lirik lagu yang lagi muter
 !lirik <judul> — Cari lirik lagu lain, cth: !lirik infrunami steve lacy
 

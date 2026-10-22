@@ -1,6 +1,7 @@
 import os
 import re
 import asyncio
+import time
 import urllib.parse
 import urllib.request
 import json
@@ -153,6 +154,14 @@ FFMPEG_OPTS = {
 
 queues: dict[int, list[tuple[str, str]]] = {}  # guild_id -> [(title, yt_query)]
 now_playing: dict[int, str] = {}  # guild_id -> "Judul - Artis" yang lagi muter
+
+# ===== STANDBY AUTOPLAY (idle 2 menit → muter playlist ini, loop) =====
+STANDBY_PLAYLIST_URL = "https://open.spotify.com/playlist/5bkHZH9YH0qkTkHUHW5rC?si=d46abc220b5f4479"
+STANDBY_IDLE_SECONDS = 120
+last_active: dict[int, float] = {}  # guild_id -> timestamp aksi musik terakhir
+last_channel: dict[int, object] = {}  # guild_id -> text channel terakhir
+standby_on: dict[int, bool] = {}  # guild_id -> lagi muter standby?
+standby_cache: dict = {"tracks": [], "at": 0.0}
 now_playing: dict[int, str] = {}  # guild_id -> "Judul - Artis" yang lagi muter
 
 SPOTIFY_RE = re.compile(r"open\.spotify\.com/(track|playlist|album)/([A-Za-z0-9]+)")
@@ -256,15 +265,15 @@ async def ensure_voice(ctx) -> discord.VoiceClient | None:
     await ctx.send("Bot lama connect ke VC (timeout). Coba `!leave` terus `!play` lagi.")
     return None
 
-async def play_next(ctx):
-    gid = ctx.guild.id
+async def play_next(guild, channel):
+    gid = guild.id
     q = queues.get(gid, [])
-    vc = ctx.voice_client
+    vc = guild.voice_client
     if not q:
         now_playing.pop(gid, None)
         return
     if vc is None or not vc.is_connected():
-        await ctx.send("⚠️ Bot ke-disconnect dari VC. Join VC lagi terus `!play` ulang.")
+        await channel.send("⚠️ Bot ke-disconnect dari VC. Join VC lagi terus `!play` ulang.")
         return
     title, query = q.pop(0)
     try:
@@ -273,20 +282,20 @@ async def play_next(ctx):
     except Exception as e:
         msg = str(e)
         if "bot" in msg.lower() or "sign in" in msg.lower() or "403" in msg:
-            await ctx.send(f"⛔ YouTube nolak (`{title}`). Fix: update yt-dlp (`pip install -U yt-dlp`), restart bot. Kalau masih, perlu cookies.txt.")
+            await channel.send(f"⛔ YouTube nolak (`{title}`). Fix: update yt-dlp (`pip install -U yt-dlp`), restart bot. Kalau masih, perlu cookies.txt.")
         else:
-            await ctx.send(f"Gagal cari `{title}`: {msg}")
+            await channel.send(f"Gagal cari `{title}`: {msg}")
         if q:
-            await play_next(ctx)
+            await play_next(guild, channel)
         return
 
     try:
         source = discord.FFmpegPCMAudio(audio_url, **FFMPEG_OPTS)
     except Exception as e:
-        await ctx.send(f"FFmpeg error (cek FFmpeg kepasang?): {e}")
+        await channel.send(f"FFmpeg error (cek FFmpeg kepasang?): {e}")
         return
 
-    ch = ctx.channel
+    ch = channel
     def after(err):
         if err:
             print(f"Player error: {err}")
@@ -295,7 +304,7 @@ async def play_next(ctx):
             except Exception:
                 pass
         try:
-            coro = play_next(ctx)
+            coro = play_next(guild, channel)
             fut = asyncio.run_coroutine_threadsafe(coro, bot.loop)
             fut.result()
         except Exception as e:
@@ -304,14 +313,76 @@ async def play_next(ctx):
     try:
         vc.play(source, after=after)
     except Exception as e:
-        await ctx.send(f"Gagal muter: {e}")
+        await channel.send(f"Gagal muter: {e}")
         return
     now_playing[gid] = title
-    await ctx.send(f"▶️ Now playing: **{title}**\n({yt_title})\nMau liriknya? Ketik `!lirik`")
+    if not standby_on.get(gid):
+        await channel.send(f"▶️ Now playing: **{title}**\n({yt_title})\nMau liriknya? Ketik `!lirik`")
+    else:
+        await channel.send(f"💤 Standby: **{title}**")
+
+def get_standby_tracks() -> list[tuple[str, str]]:
+    """Ambil tracklist standby playlist (cache 1 jam). Butuh Spotify API keys yang valid."""
+    now = time.time()
+    if standby_cache["tracks"] and now - standby_cache["at"] < 3600:
+        return list(standby_cache["tracks"])
+    try:
+        tracks = get_spotify_tracks(STANDBY_PLAYLIST_URL)
+    except Exception as e:
+        print(f"Standby fetch gagal: {e}")
+        return []
+    if tracks:
+        standby_cache.update({"tracks": tracks, "at": now})
+        return list(tracks)
+    return []
+
+async def standby_monitor():
+    """Loop tiap 20 dtk: bot idle di VC 2 mnt (queue kosong, nggak muter) → muter standby playlist (loop)."""
+    await bot.wait_until_ready()
+    while not bot.is_closed():
+        await asyncio.sleep(20)
+        now = time.time()
+        for guild in bot.guilds:
+            try:
+                if ALLOWED_GUILD_ID and guild.id != ALLOWED_GUILD_ID:
+                    continue
+                vc = guild.voice_client
+                if vc is None or not vc.is_connected():
+                    continue
+                gid = guild.id
+                if standby_on.get(gid):
+                    continue
+                if vc.is_playing() or vc.is_paused():
+                    continue
+                if queues.get(gid):
+                    continue
+                if now - last_active.get(gid, now) < STANDBY_IDLE_SECONDS:
+                    continue
+                ch = last_channel.get(gid)
+                if ch is None:
+                    cands = [c for c in guild.text_channels if c.permissions_for(guild.me).send_messages]
+                    ch = cands[0] if cands else None
+                if ch is None:
+                    continue
+                loop = asyncio.get_running_loop()
+                tracks = await loop.run_in_executor(None, get_standby_tracks)
+                if not tracks:
+                    await ch.send("💤 Idle 2 menit tapi standby playlist nggak kebaca (cek Spotify keys di .env).")
+                    last_active[gid] = now  # jangan spam tiap 20 dtk
+                    continue
+                standby_on[gid] = True
+                queues.setdefault(gid, []).extend(tracks)
+                await ch.send(f"💤 Idle 2 menit, muter standby playlist ({len(tracks)} lagu, loop). `!play` buat gantiin.")
+                await play_next(guild, ch)
+            except Exception as e:
+                print(f"standby monitor error: {e}")
 
 @bot.event
 async def on_ready():
     print(f"Login sebagai {bot.user} - siap buat call pribadi!")
+    if not getattr(bot, "_standby_started", False):
+        bot._standby_started = True
+        bot.loop.create_task(standby_monitor())
 
 @bot.event
 async def on_guild_join(guild):
@@ -359,16 +430,26 @@ async def play(ctx, *, url: str):
             await ctx.send("Link Spotify nggak kebaca. Coba link track/album public.")
         return
     gid = ctx.guild.id
+    last_active[gid] = time.time()
+    last_channel[gid] = ctx.channel
+    # kalau standby lagi jalan, matiin + ganti lagu request user
+    if standby_on.get(gid):
+        standby_on[gid] = False
+        queues[gid] = []
+        if vc.is_playing() or vc.is_paused():
+            vc.stop()  # after() jalan → play_next liat queue kosong → beres
+            await asyncio.sleep(0.5)
     queues.setdefault(gid, []).extend(tracks)
     if len(tracks) == 1:
         await ctx.send(f"➕ Antri: **{tracks[0][0]}**")
     else:
         await ctx.send(f"➕ Antri {len(tracks)} lagu dari Spotify.")
     if not vc.is_playing() and not vc.is_paused():
-        await play_next(ctx)
+        await play_next(ctx.guild, ctx.channel)
 
 @bot.command(name="skip")
 async def skip(ctx):
+    last_active[ctx.guild.id] = time.time()
     if ctx.voice_client and ctx.voice_client.is_playing():
         ctx.voice_client.stop()
         await ctx.send("⏭️ Skip.")
@@ -380,6 +461,8 @@ async def stop(ctx):
     gid = ctx.guild.id
     queues[gid] = []
     now_playing.pop(gid, None)
+    standby_on[gid] = False
+    last_active[gid] = time.time()  # standby nyala lagi 2 mnt kemudian kalau bot masih di VC
     if ctx.voice_client and (ctx.voice_client.is_playing() or ctx.voice_client.is_paused()):
         ctx.voice_client.stop()
     await ctx.send("⏹️ Berhenti + queue dikosongin.")
@@ -389,6 +472,8 @@ async def leave(ctx):
     gid = ctx.guild.id
     queues[gid] = []
     now_playing.pop(gid, None)
+    standby_on[gid] = False
+    last_active[gid] = time.time()
     if ctx.voice_client:
         await ctx.voice_client.disconnect()
         await ctx.send("Bot cabut dari call. 👋")
@@ -1327,7 +1412,7 @@ async def bomb_stop(ctx):
 async def game_rules(ctx, nama: str = ""):
     nama = nama.lower().strip()
     if nama in ("musik", "music", "play"):
-        await ctx.send("🎵 **MUSIK**\nJoin voice dulu → `!play <link spotify track / judul>` → bot join + muter.\n`!skip` skip, `!stop` berhenti+clear, `!leave` cabut, `!queue` liat antrian.\n`!lirik` lirik lagu yang lagi muter, `!lirik <judul>` cari lirik lain.")
+        await ctx.send("🎵 **MUSIK**\nJoin voice dulu → `!play <link spotify track / judul>` → bot join + muter (bisa multi-link sekaligus).\n`!skip` skip, `!stop` berhenti+clear, `!leave` cabut, `!queue` liat antrian.\n`!lirik` lirik lagu yang lagi muter, `!lirik <judul>` cari lirik lain.\n💤 Idle 2 menit di VC → standby playlist muter otomatis (loop). `!play` apa aja langsung gantiin.")
     elif nama in ("quiz", "quizduel"):
         await ctx.send("❓ **QUIZ DUEL**\n`!quizduel @temen 5` → lawan `!accept` → bot kasih 5 soal.\nJawab pake `!jawab <jawaban>`, tercepat bener +1. Timeout 30 dtk/soal. `!lewat` skip soal, `!stopquiz` berhenti.")
     elif nama in ("tod", "truth", "dare", "truthordare"):
