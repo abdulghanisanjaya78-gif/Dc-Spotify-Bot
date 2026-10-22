@@ -158,6 +158,18 @@ now_playing: dict[int, str] = {}  # guild_id -> "Judul - Artis" yang lagi muter
 # ===== STANDBY AUTOPLAY (idle 2 menit → muter playlist ini, loop) =====
 STANDBY_PLAYLIST_URL = "https://open.spotify.com/playlist/5bkHZH9YH0qkTkHUHW5rC?si=d46abc220b5f4479"
 STANDBY_IDLE_SECONDS = 120
+# cadangan kalau API Spotify ngunci (403): tracklist playlist standby, diisi manual
+STANDBY_FALLBACK: list[tuple[str, str]] = [
+    ("Kembali Pulang - Suara Kayu, Feby Putri", "Kembali Pulang Suara Kayu Feby Putri audio"),
+    ("Rumah Ke Rumah - Hindia", "Rumah Ke Rumah Hindia audio"),
+    ("Serana - For Revenge", "Serana For Revenge audio"),
+    ("Nina - .Feast", "Nina Feast audio"),
+    ("Bunga Maaf - The Lantis", "Bunga Maaf The Lantis audio"),
+    ("Bunga Terakhir - Romeo", "Bunga Terakhir Romeo audio"),
+    ("Tak Kan Hilang - Budi Doremi", "Tak Kan Hilang Budi Doremi audio"),
+    ("Tanpa Cinta - Yovie & Nuno", "Tanpa Cinta Yovie Nuno audio"),
+    ("Pesan Terakhir - Lyodra", "Pesan Terakhir Lyodra audio"),
+]
 last_active: dict[int, float] = {}  # guild_id -> timestamp aksi musik terakhir
 last_channel: dict[int, object] = {}  # guild_id -> text channel terakhir
 standby_on: dict[int, bool] = {}  # guild_id -> lagi muter standby?
@@ -322,7 +334,7 @@ async def play_next(guild, channel):
         await channel.send(f"💤 Standby: **{title}**")
 
 def get_standby_tracks() -> list[tuple[str, str]]:
-    """Ambil tracklist standby playlist (cache 1 jam). Butuh Spotify API keys yang valid."""
+    """Ambil tracklist standby playlist (cache 1 jam). Kalau API ngunci, pake STANDBY_FALLBACK."""
     now = time.time()
     if standby_cache["tracks"] and now - standby_cache["at"] < 3600:
         return list(standby_cache["tracks"])
@@ -330,10 +342,13 @@ def get_standby_tracks() -> list[tuple[str, str]]:
         tracks = get_spotify_tracks(STANDBY_PLAYLIST_URL)
     except Exception as e:
         print(f"Standby fetch gagal: {e}")
-        return []
+        tracks = []
     if tracks:
         standby_cache.update({"tracks": tracks, "at": now})
         return list(tracks)
+    if STANDBY_FALLBACK:
+        print("Standby pake fallback manual (API ngunci).")
+        return list(STANDBY_FALLBACK)
     return []
 
 async def standby_monitor():
