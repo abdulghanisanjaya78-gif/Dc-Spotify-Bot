@@ -220,11 +220,24 @@ async def ensure_voice(ctx) -> discord.VoiceClient | None:
         await ctx.send("Kamu harus join voice channel dulu.")
         return None
     channel = ctx.author.voice.channel
-    if ctx.voice_client is None:
-        return await channel.connect()
-    if ctx.voice_client.channel != channel:
-        await ctx.voice_client.move_to(channel)
-    return ctx.voice_client
+    try:
+        if ctx.voice_client is None:
+            vc = await channel.connect()
+        elif ctx.voice_client.channel != channel:
+            await ctx.voice_client.move_to(channel)
+            vc = ctx.voice_client
+        else:
+            vc = ctx.voice_client
+    except Exception as e:
+        await ctx.send(f"Gagal join VC: {e} (cek permission Connect/Speak bot).")
+        return None
+    # tunggu handshake voice kelar (connect() return belum tentu connected)
+    for _ in range(100):
+        if vc.is_connected():
+            return vc
+        await asyncio.sleep(0.1)
+    await ctx.send("Bot lama connect ke VC (timeout). Coba `!leave` terus `!play` lagi.")
+    return None
 
 async def play_next(ctx):
     gid = ctx.guild.id
