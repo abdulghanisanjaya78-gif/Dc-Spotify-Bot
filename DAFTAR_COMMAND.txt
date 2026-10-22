@@ -1,0 +1,42 @@
+🎮 BOT PRIVATE — DAFTAR COMMAND
+
+=== 🎵 MUSIK ===
+!play <link spotify / judul> — Join VC kamu + antre + muter. Cth: !play https://open.spotify.com/track/...
+!skip — Skip lagu yang lagi muter
+!stop — Berhenti + kosongin queue
+!leave — Bot cabut dari VC
+!queue — Lihat antrian
+!lirik — Lirik lagu yang lagi muter
+!lirik <judul> — Cari lirik lagu lain, cth: !lirik infrunami steve lacy
+
+=== ❓ QUIZ DUEL (berdua) ===
+!quizduel @temen [3-10] — Tantang duel. Cth: !quizduel @Lelee 5
+!accept — Diterima yang ditantang, langsung mulai
+!jawab <jawaban> — Jawab soal aktif, tercepat bener +1
+!stopquiz — Hentikan quiz
+
+=== 🙊 TRUTH OR DARE ===
+!truth — Pertanyaan random buat kamu
+!dare — Tantangan random buat kamu
+!tod [@temen] — Random truth/dare buat target. Cth: !tod @Lelee
+
+=== 🧠 MIND READER (10 ronde, rahasia) ===
+!mindreader @temen — Tantang
+!mindaccept — Diterima, mulai ronde 1
+!coop — Pilih 🤝 (DM ke bot biar rahasia)
+!betray — Pilih 🗡️ (DM ke bot)
+!protect — Pilih 🛡️ (DM ke bot)
+!mindscore — Cek skor + ronde
+!mindstop — Hentikan (bisa dari DM / channel)
+Aturan poin: C-C +3/+3, C-B -2/+5, P kena B +1/+1, B-B 0/0, P-P 1/1, P-C +2/+2
+
+=== 💣 BOMB DEFUSAL (co-op, wajib VC) ===
+!bomb @temen — Ajak misi. Kamu=P1 liat bom, dia=P2 pegang manual
+!bombaccept — Diterima, bot DM gambar bom ke P1 + manual ke P2
+!cut <nomor> — Potong kabel di channel. Cth: !cut 2
+!bombstop — Batalkan misi
+Aturan: 4 kabel, 3 menit, 3x salah meledak. Jangan share gambar DM, ngobrol via VC!
+
+=== 📖 BANTUAN ===
+!games — List semua game
+!rules <musik|quiz|tod|mind|bomb> — Aturan lengkap per game. Cth: !rules bomb
