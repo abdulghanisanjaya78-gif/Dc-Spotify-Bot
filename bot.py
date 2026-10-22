@@ -75,32 +75,49 @@ def itunes_song_query(song_title: str) -> str:
         return f"{t.get('trackName', song_title)} {t.get('artistName', '')} audio".strip()
     return f"{song_title} audio"
 
+def _album_base(name: str) -> str:
+    n = name.lower().strip()
+    n = re.sub(r"\s*[\-\(\[]\s*(single|ep|deluxe.*|remaster.*|anniversary.*|expanded.*)\)?$", "", n).strip()
+    return n
+
 def itunes_album_tracks(album_title: str, limit: int = 20) -> list[tuple[str, str]]:
     """Cari tracklist album via iTunes (gratis). Return [(display, yt_query)]."""
-    data = _itunes_get("/search?term=" + urllib.parse.quote(album_title) + "&entity=album&limit=5")
+    data = _itunes_get("/search?term=" + urllib.parse.quote(album_title) + "&entity=album&limit=25")
     if not data or not data.get("results"):
         return []
-    # pilih album yang judulnya paling mirip
-    best = None
-    at = album_title.lower()
+    # skor: judul inti sama persis > substring; utamain album beneran (trackCount gede) bukan single
+    at = _album_base(album_title)
+    scored = []
     for a in data["results"]:
-        name = (a.get("collectionName") or "").lower()
-        if at in name or name in at:
-            best = a
-            break
-    best = best or data["results"][0]
+        name = _album_base(a.get("collectionName") or "")
+        if not name:
+            continue
+        score = 2 if name == at else (1 if (at in name or name in at) else -1)
+        if score < 0:
+            continue
+        scored.append((score, a.get("trackCount") or 0, a))
+    if not scored:
+        return []
+    scored.sort(key=lambda x: (x[0], x[1]), reverse=True)
+    best = scored[0][2]
+    # kalau yang ketemu cuma single (1 lagu) padahal user kasih link ALBUM,
+    # berarti album aslinya nggak ada di iTunes → biar fallback full-album YouTube yang jalan
+    if (best.get("trackCount") or 0) <= 1:
+        return []
     cid = best.get("collectionId")
     if not cid:
         return []
-    d2 = _itunes_get(f"/lookup?id={cid}&entity=song&limit={limit + 5}")
+    d2 = _itunes_get(f"/lookup?id={cid}&entity=song&limit={limit + 10}")
     if not d2 or not d2.get("results"):
         return []
     out = []
-    for t in d2["results"][1:limit + 1]:
+    for t in d2["results"][1:]:
         if t.get("wrapperType") != "track":
             continue
         title = f"{t.get('trackName')} - {t.get('artistName')}"
         out.append((title, f"{title} audio"))
+        if len(out) >= limit:
+            break
     return out
 
 intents = discord.Intents.default()
@@ -196,8 +213,8 @@ def get_spotify_tracks(url: str) -> list[tuple[str, str]]:
         tracks = itunes_album_tracks(title, limit=20)
         if tracks:
             return tracks
-        # fallback: putar sebagai 1 item full album
-        return [(title, f"{title} full album audio")]
+        # fallback: cari video full album di YouTube (cocok buat album indie yang nggak ada di iTunes)
+        return [(title + " (full album)", f"{title} full album")]
     else:
         # playlist user butuh Spotify keys (tracklist user nggak ada di iTunes)
         return []
