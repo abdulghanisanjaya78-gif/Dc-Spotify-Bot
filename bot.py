@@ -1203,8 +1203,9 @@ async def games_list(ctx):
         "3. 🙊 Truth or Dare — `!truth` / `!dare` / `!tod @temen`\n"
         "4. 🧠 Mind Reader — `!mindreader @temen` → `!mindaccept`\n"
         "5. 💣 Bomb Defusal — `!bomb @temen` → `!bombaccept` → `!cut <nomor>`\n"
-        "6. 🔤 Tebak Kata — `!tebakkata` → `!tebak <huruf/kata>` → `!nyerah`\n"
-        "Ketik `!rules <musik|quiz|tod|mind|bomb|kata>` buat aturan lengkap."
+        "6. 🔤 Tebak Kata — `!tebakkata` → `!tebak <huruf/kata>` → `!hint` / `!nyerah`\n"
+        "7. 🖼️ Tebak Gambar — `!tebakgambar` → `!jg <jawaban>` → `!bocoran` / `!stopgambar`\n"
+        "Ketik `!rules <musik|quiz|tod|mind|bomb|kata|gambar>` buat aturan lengkap."
     )
 
 # ===== 4. BOMB DEFUSAL (Co-op 2 pemain + UI 2D) =====
@@ -1446,8 +1447,15 @@ async def game_rules(ctx, nama: str = ""):
             "Ngobrol di VC, potong berurutan pake `!cut <nomor>` di channel. 3 menit, 3x salah meledak.\n"
             "P1 jangan share gambar bom, P2 jangan share manual — komunikasi mulut aja!"
         )
+    if nama in ("gambar", "tebakgambar"):
+        await ctx.send(
+            "🖼️ **TEBAK GAMBAR (co-op)**\n"
+            "`!tebakgambar` mulai → bot kirim gambar pixel burem + clue kategori.\n"
+            "Tebak bareng pake `!jg <jawaban>`. 5x salah = kalah.\n"
+            "`!bocoran` bikin gambar makin jelas (max 2x), `!stopgambar` nyerah + liat jawaban."
+        )
     else:
-        await ctx.send("Pilih: `!rules musik` / `!rules quiz` / `!rules tod` / `!rules mind` / `!rules bomb` / `!rules kata`")
+        await ctx.send("Pilih: `!rules musik` / `!rules quiz` / `!rules tod` / `!rules mind` / `!rules bomb` / `!rules kata` / `!rules gambar`")
     if nama in ("kata", "tebakkata", "hangman"):
         await ctx.send(
             "🔤 **TEBAK KATA (co-op)**\n"
@@ -1626,5 +1634,87 @@ async def kata_giveup(ctx):
         await ctx.send(f"🏳️ Nyerah! Katanya **{g['word']}**.")
     else:
         await ctx.send("Nggak ada game jalan. Mulai `!tebakkata`.")
+
+# ===== 6. TEBAK GAMBAR (pixel co-op berdua) =====
+try:
+    import gambar_assets
+    from gambar_assets import GAMBAR_LIST
+except Exception as e:
+    gambar_assets = None
+    GAMBAR_LIST = []
+    print(f"gambar_assets gagal load: {e}")
+
+active_gambar: dict[int, dict] = {}
+
+@bot.command(name="tebakgambar")
+@is_allowed_guild()
+async def gambar_start(ctx):
+    if gambar_assets is None:
+        await ctx.send("Modul gambar belum kepasang.")
+        return
+    gid = ctx.guild.id
+    if gid in active_gambar:
+        await ctx.send("Lagi ada tebak gambar jalan. `!stopgambar` dulu kalau mau ganti.")
+        return
+    answer, clue, grid = random.choice(GAMBAR_LIST)
+    active_gambar[gid] = {"answer": answer, "clue": clue, "grid": grid, "stage": 0,
+                          "wrong": 0, "max_wrong": 5, "bocoran": 0, "channel": ctx.channel}
+    buf = gambar_assets.make_gambar_image(grid, stage=0)
+    await ctx.send(
+        f"🖼️ **TEBAK GAMBAR mulai!** 💡 Clue: **{clue}** (co-op berdua, 5x salah = kalah).\n"
+        f"Jawab pake `!jg <jawaban>`. Gambar burem? `!bocoran` (max 2x) atau `!stopgambar` buat nyerah.",
+        file=discord.File(fp=buf, filename="tebak.png"),
+    )
+
+@bot.command(name="jg")
+@is_allowed_guild()
+async def gambar_guess(ctx, *, teks: str):
+    gid = ctx.guild.id
+    g = active_gambar.get(gid)
+    if not g:
+        return
+    t = teks.lower().strip()
+    if t == g["answer"]:
+        active_gambar.pop(gid, None)
+        buf = gambar_assets.make_gambar_image(g["grid"], stage=2)
+        await ctx.send(f"🎉 BENER! Gambarnya **{g['answer']}**. GG {ctx.author.mention}!",
+                      file=discord.File(fp=buf, filename="tebak.png"))
+    else:
+        g["wrong"] += 1
+        if g["wrong"] >= g["max_wrong"]:
+            active_gambar.pop(gid, None)
+            buf = gambar_assets.make_gambar_image(g["grid"], stage=2)
+            await ctx.send(f"💀 Salah {g['max_wrong']}x! Jawabannya **{g['answer']}**.",
+                           file=discord.File(fp=buf, filename="tebak.png"))
+        else:
+            await ctx.send(f"❌ `{t}` salah. Sisa: {g['max_wrong']-g['wrong']}x. 💡 {g['clue']} — `!bocoran` biar jelas ({g['bocoran']}/2).")
+
+@bot.command(name="bocoran")
+@is_allowed_guild()
+async def gambar_hint(ctx):
+    gid = ctx.guild.id
+    g = active_gambar.get(gid)
+    if not g:
+        await ctx.send("Nggak ada game jalan. Mulai `!tebakgambar`.")
+        return
+    if g["bocoran"] >= 2:
+        await ctx.send("💡 Bocoran habis! (2/2)")
+        return
+    g["bocoran"] += 1
+    g["stage"] = min(g["stage"] + 1, 2)
+    buf = gambar_assets.make_gambar_image(g["grid"], stage=g["stage"])
+    await ctx.send(f"💡 Bocoran {g['bocoran']}/2 — 💡 {g['clue']}",
+                   file=discord.File(fp=buf, filename="tebak.png"))
+
+@bot.command(name="stopgambar")
+@is_allowed_guild()
+async def gambar_stop(ctx):
+    g = active_gambar.pop(ctx.guild.id, None)
+    if g:
+        buf = gambar_assets.make_gambar_image(g["grid"], stage=2)
+        await ctx.send(f"🏳️ Nyerah! Jawabannya **{g['answer']}**.",
+                       file=discord.File(fp=buf, filename="tebak.png"))
+    else:
+        await ctx.send("Nggak ada game jalan.")
 
 bot.run(TOKEN)
