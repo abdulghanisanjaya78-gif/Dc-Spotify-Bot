@@ -1657,14 +1657,30 @@ async def gambar_start(ctx):
         await ctx.send("Lagi ada tebak gambar jalan. `!stopgambar` dulu kalau mau ganti.")
         return
     answer, clue, grid = random.choice(GAMBAR_LIST)
+    await ctx.send("🔍 Nyari fotonya...")
+    try:
+        loop = asyncio.get_running_loop()
+        foto = await loop.run_in_executor(None, lambda: gambar_assets.fetch_foto(answer))
+    except Exception as e:
+        print(f"fetch foto gagal: {e}")
+        foto = None
     active_gambar[gid] = {"answer": answer, "clue": clue, "grid": grid, "stage": 0,
-                          "wrong": 0, "max_wrong": 5, "bocoran": 0, "channel": ctx.channel}
-    buf = gambar_assets.make_gambar_image(grid, stage=0)
+                          "wrong": 0, "max_wrong": 5, "bocoran": 0, "channel": ctx.channel,
+                          "foto": foto}
+    if foto:
+        buf = gambar_assets.make_foto_image(foto, stage=0)
+    else:
+        buf = gambar_assets.make_gambar_image(grid, stage=0)
     await ctx.send(
         f"🖼️ **TEBAK GAMBAR mulai!** 💡 Clue: **{clue}** (co-op berdua, 5x salah = kalah).\n"
         f"Jawab pake `!jg <jawaban>`. Gambar burem? `!bocoran` (max 2x) atau `!stopgambar` buat nyerah.",
         file=discord.File(fp=buf, filename="tebak.png"),
     )
+
+def _gambar_file(g):
+    if g.get("foto"):
+        return discord.File(fp=gambar_assets.make_foto_image(g["foto"], stage=g["stage"]), filename="tebak.png")
+    return discord.File(fp=gambar_assets.make_gambar_image(g["grid"], stage=g["stage"]), filename="tebak.png")
 
 @bot.command(name="jg")
 @is_allowed_guild()
@@ -1676,16 +1692,16 @@ async def gambar_guess(ctx, *, teks: str):
     t = teks.lower().strip()
     if t == g["answer"]:
         active_gambar.pop(gid, None)
-        buf = gambar_assets.make_gambar_image(g["grid"], stage=2)
+        g["stage"] = 2
         await ctx.send(f"🎉 BENER! Gambarnya **{g['answer']}**. GG {ctx.author.mention}!",
-                      file=discord.File(fp=buf, filename="tebak.png"))
+                      file=_gambar_file(g))
     else:
         g["wrong"] += 1
         if g["wrong"] >= g["max_wrong"]:
             active_gambar.pop(gid, None)
-            buf = gambar_assets.make_gambar_image(g["grid"], stage=2)
+            g["stage"] = 2
             await ctx.send(f"💀 Salah {g['max_wrong']}x! Jawabannya **{g['answer']}**.",
-                           file=discord.File(fp=buf, filename="tebak.png"))
+                           file=_gambar_file(g))
         else:
             await ctx.send(f"❌ `{t}` salah. Sisa: {g['max_wrong']-g['wrong']}x. 💡 {g['clue']} — `!bocoran` biar jelas ({g['bocoran']}/2).")
 
@@ -1702,18 +1718,17 @@ async def gambar_hint(ctx):
         return
     g["bocoran"] += 1
     g["stage"] = min(g["stage"] + 1, 2)
-    buf = gambar_assets.make_gambar_image(g["grid"], stage=g["stage"])
     await ctx.send(f"💡 Bocoran {g['bocoran']}/2 — 💡 {g['clue']}",
-                   file=discord.File(fp=buf, filename="tebak.png"))
+                   file=_gambar_file(g))
 
 @bot.command(name="stopgambar")
 @is_allowed_guild()
 async def gambar_stop(ctx):
     g = active_gambar.pop(ctx.guild.id, None)
     if g:
-        buf = gambar_assets.make_gambar_image(g["grid"], stage=2)
+        g["stage"] = 2
         await ctx.send(f"🏳️ Nyerah! Jawabannya **{g['answer']}**.",
-                       file=discord.File(fp=buf, filename="tebak.png"))
+                       file=_gambar_file(g))
     else:
         await ctx.send("Nggak ada game jalan.")
 

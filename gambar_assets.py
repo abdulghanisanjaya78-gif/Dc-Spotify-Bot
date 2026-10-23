@@ -147,6 +147,78 @@ def _font(size=26):
     except Exception:
         return ImageFont.load_default()
 
+# Foto asli (Wikimedia Commons, lisensi bebas). Diambil via Special:FilePath.
+FOTO = {
+    "apel": "Red Apple.jpg",
+    "rumah": "Small wooden house on lake.jpg",
+    "matahari": "Mrg sun sky blue.jpg",
+    "kucing": "Cat November 2010-1a.jpg",
+    "mobil": "Red Smart Car Side View Driveway.jpg",
+    "pohon": "Rainfall nourishing the earth under a lone tree in a vibrant green field.jpg",
+    "bunga": "Sunflower sky backdrop.jpg",
+    "ikan": "Carassius auratus auratus (goldfish) 2.jpg",
+    "hati": "Red heart.jpg",
+    "bintang": "A starry sky above Death Valley and Orionid.jpg",
+    "jamur": "Fly Agaric mushroom 04.jpg",
+    "kapal": "OCEAN EXPRESS Clipper ship sailing card.jpg",
+}
+
+import os as _os
+import urllib.request as _req
+import urllib.parse as _parse
+
+def fetch_foto(answer: str) -> bytes | None:
+    """Download foto jawaban (cache di .cache/). Return bytes atau None kalau gagal."""
+    fname = FOTO.get(answer)
+    if not fname:
+        return None
+    try:
+        _os.makedirs(".cache", exist_ok=True)
+    except FileExistsError:
+        pass
+    safe = "".join(c if c.isalnum() else "_" for c in answer) + ".jpg"
+    path = _os.path.join(".cache", "gambar_" + safe)
+    if _os.path.exists(path) and _os.path.getsize(path) > 1000:
+        with open(path, "rb") as f:
+            return f.read()
+    url = "https://commons.wikimedia.org/wiki/Special:FilePath/" + _parse.quote(fname) + "?width=480"
+    try:
+        r = _req.Request(url, headers={"User-Agent": "dc-tebakgambar-bot/1.0 (private discord bot)"})
+        with _req.urlopen(r, timeout=20) as resp:
+            data = resp.read()
+        if len(data) < 1000:
+            return None
+        with open(path, "wb") as f:
+            f.write(data)
+        return data
+    except Exception as e:
+        print(f"fetch foto {answer} gagal: {e}")
+        return None
+
+def make_foto_image(data: bytes, stage=0):
+    """Pixelasi foto asli per tahap: 0 burem banget, 1 lumayan, 2 jelas."""
+    from PIL import ImageOps
+    img = Image.open(io.BytesIO(data)).convert("RGB")
+    # crop tengah jadi kotak
+    w, h = img.size
+    s = min(w, h)
+    img = img.crop(((w - s) // 2, (h - s) // 2, (w + s) // 2, (h + s) // 2))
+    tiny = {0: 10, 1: 28, 2: 480}[min(max(stage, 0), 2)]
+    if tiny < 480:
+        img = img.resize((tiny, tiny), Image.BILINEAR).resize((480, 480), Image.NEAREST)
+    else:
+        img = ImageOps.fit(img, (480, 480))
+    canvas = Image.new("RGB", (520, 580), (18, 18, 24))
+    canvas.paste(img, (20, 20))
+    d = ImageDraw.Draw(canvas)
+    d.rounded_rectangle([10, 10, 510, 570], radius=18, outline=(80, 80, 100), width=3)
+    label = ["SANGAT BUREM 🔍", "LUMAYAN 🙂", "JELAS 😎"][min(max(stage, 0), 2)]
+    d.text((20, 515), f"TEBAK GAMBAR — {label}", font=_font(28), fill=(255, 255, 255))
+    buf = io.BytesIO()
+    canvas.save(buf, format="PNG")
+    buf.seek(0)
+    return buf
+
 def make_gambar_image(grid, stage=0):
     """stage 0 = burem banget, 1 = lumayan, 2 = jelas."""
     n = len(grid)
