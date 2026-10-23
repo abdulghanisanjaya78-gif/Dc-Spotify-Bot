@@ -40,4 +40,10 @@ Aturan: 4 kabel, 3 menit, 3x salah meledak. Jangan share gambar DM, ngobrol via 
 
 === 📖 BANTUAN ===
 !games — List semua game
-!rules <musik|quiz|tod|mind|bomb> — Aturan lengkap per game. Cth: !rules bomb
+!rules <musik|quiz|tod|mind|bomb|kata|gambar> — Aturan lengkap per game
+
+=== 🖼️ TEBAK GAMBAR (co-op) ===
+!tebakgambar — Mulai, bot kirim gambar pixel + clue
+!jg <jawaban> — Tebak gambarnya (5x salah = kalah)
+!bocoran — Gambar makin jelas (max 2x)
+!stopgambar — Nyerah + liat jawaban. Cth: !rules bomb
