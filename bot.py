@@ -1453,7 +1453,8 @@ async def game_rules(ctx, nama: str = ""):
             "🔤 **TEBAK KATA (co-op)**\n"
             "`!tebakkata` mulai → bot milih kata rahasia + kasih clue kategori + buka 1 huruf gratis.\n"
             "Tebak bareng pake `!tebak <huruf>` atau langsung `!tebak <kata>`.\n"
-            "Nyawa per orang 6 — salahmu nggak ngurangin nyawa temen. Gugur sendiri-sendiri, game kalah kalau semua gugur. `!nyerah` liat jawaban."
+            "Nyawa per orang 6 — salahmu nggak ngurangin nyawa temen. Gugur sendiri-sendiri, game kalah kalau semua gugur.\n"
+            "`!hint` buka 1 huruf acak (max 2x), `!nyerah` liat jawaban."
         )
 
 # ===== 5. TEBAK KATA (hangman co-op berdua) =====
@@ -1517,7 +1518,7 @@ async def tebakkata_start(ctx):
     opening: set = set()
     if len(word) >= 4:
         opening.add(random.choice(word))
-    active_kata[gid] = {"word": word, "clue": clue, "guessed": set(opening), "wrong": {}, "dead": set(), "max_wrong": 6, "channel": ctx.channel}
+    active_kata[gid] = {"word": word, "clue": clue, "guessed": set(opening), "wrong": {}, "dead": set(), "max_wrong": 6, "hints": 0, "max_hints": 2, "channel": ctx.channel}
     board = _kata_board(word, opening)
     extra = f"\n🎁 Huruf pembuka: `{''.join(sorted(opening))}`" if opening else ""
     await ctx.send(
@@ -1591,6 +1592,31 @@ async def tebak_guess(ctx, *, teks: str):
             else:
                 board = _kata_board(word, g["guessed"])
                 await ctx.send(f"❌ `{t}` salah. Sisa nyawamu: {lives(uid)}\n`{board}`\n💡 {g['clue']} • {len(word)} huruf\n{HANGMAN[g['wrong'][uid]]}")
+
+@bot.command(name="hint")
+@is_allowed_guild()
+async def kata_hint(ctx):
+    """Buka 1 huruf acak (max 2x per game)."""
+    g = active_kata.get(ctx.guild.id)
+    if not g:
+        await ctx.send("Nggak ada game jalan. Mulai `!tebakkata`.")
+        return
+    if g["hints"] >= g["max_hints"]:
+        await ctx.send(f"💡 Hint habis! ({g['hints']}/{g['max_hints']})")
+        return
+    hidden = [c for c in set(g["word"]) if c not in g["guessed"]]
+    if not hidden:
+        await ctx.send("Udah kebuka semua!")
+        return
+    pick = random.choice(hidden)
+    g["guessed"].add(pick)
+    g["hints"] += 1
+    board = _kata_board(g["word"], g["guessed"])
+    if "_" not in board.replace(" ", ""):
+        active_kata.pop(ctx.guild.id, None)
+        await ctx.send(f"💡 Hint {g['hints']}/{g['max_hints']}: huruf `{pick}`!\n`{board}`\n🎉 Kebuka semua! Katanya **{g['word']}**. GG!")
+    else:
+        await ctx.send(f"💡 Hint {g['hints']}/{g['max_hints']}: huruf `{pick}`!\n`{board}`\n💡 {g['clue']} • {len(g['word'])} huruf\n{HANGMAN[max(g['wrong'].values()) if g['wrong'] else 0]}")
 
 @bot.command(name="nyerah")
 @is_allowed_guild()
