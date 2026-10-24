@@ -287,6 +287,8 @@ async def play_next(guild, channel):
     if vc is None or not vc.is_connected():
         await channel.send("⚠️ Bot ke-disconnect dari VC. Join VC lagi terus `!play` ulang.")
         return
+    if alarm_sounding.get(gid):
+        return  # sirene lagi bunyi, queue ditahan dulu
     title, query = q.pop(0)
     try:
         loop = asyncio.get_running_loop()
@@ -1640,6 +1642,9 @@ async def kata_giveup(ctx):
 import datetime as _dt
 alarms: dict[int, list[dict]] = {}
 _alarm_id: dict[int, int] = {}
+alarm_sounding: dict[int, bool] = {}  # lagi bunyi sirene → play_next nunggu
+SIREN_SRC = "aevalsrc=sin(2*PI*(660+220*sin(2*PI*0.5*t))*t):s=44100:d=20"
+SIREN_OPTS = {"before_options": "-f lavfi -nostdin", "options": "-vn -filter:a volume=2.5"}
 
 def _parse_alarm(when: str) -> int | None:
     """'10s/5m/1h/2d' atau '20:00' → detik dari sekarang. None kalau format salah."""
@@ -1669,10 +1674,41 @@ async def _alarm_worker(gid: int, aid: int, delay: int, channel, mention: str, t
     if job is None:
         return
     lst.remove(job)
-    try:
-        await channel.send(f"⏰ **ALARM** {mention}\n{text}")
-    except Exception as e:
-        print(f"alarm kirim gagal: {e}")
+    guild = channel.guild
+    vc = guild.voice_client if guild else None
+    if vc is not None and vc.is_connected():
+        alarm_sounding[gid] = True
+        try:
+            await channel.send(f"🚨🚨 **ALARM NUKLIR** {mention}\n{text}\n🔊 Sirene bunyi 20 detik!")
+        except Exception:
+            pass
+        try:
+            if vc.is_playing() or vc.is_paused():
+                vc.stop()
+                await asyncio.sleep(0.5)
+            src = discord.FFmpegPCMAudio(SIREN_SRC, **SIREN_OPTS)
+            def _after(err):
+                if err:
+                    print(f"sirene error: {err}")
+                alarm_sounding[gid] = False
+                try:
+                    fut = asyncio.run_coroutine_threadsafe(play_next(guild, channel), bot.loop)
+                    fut.result()
+                except Exception as e:
+                    print(f"sirene after error: {e}")
+            vc.play(src, after=_after)
+        except Exception as e:
+            alarm_sounding[gid] = False
+            print(f"sirene gagal: {e}")
+            try:
+                await channel.send(f"⏰ **ALARM** {mention}\n{text}\n(sirene gagal: {e})")
+            except Exception:
+                pass
+    else:
+        try:
+            await channel.send(f"⏰ **ALARM** {mention}\n{text}\n(bot nggak di VC — join VC biar ada sirenenya)")
+        except Exception as e:
+            print(f"alarm kirim gagal: {e}")
 
 @bot.command(name="alarm")
 @is_allowed_guild()
