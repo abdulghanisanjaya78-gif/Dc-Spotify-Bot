@@ -1635,6 +1635,93 @@ async def kata_giveup(ctx):
     else:
         await ctx.send("Nggak ada game jalan. Mulai `!tebakkata`.")
 
+# ===== ALARM / REMINDER =====
+import datetime as _dt
+alarms: dict[int, list[dict]] = {}
+_alarm_id: dict[int, int] = {}
+
+def _parse_alarm(when: str) -> int | None:
+    """'10s/5m/1h/2d' atau '20:00' → detik dari sekarang. None kalau format salah."""
+    when = when.lower().strip()
+    m = re.fullmatch(r"(\d+)\s*([smhd])?", when)
+    if m:
+        n, unit = int(m.group(1)), (m.group(2) or "m")
+        if n <= 0 or n > 100000:
+            return None
+        return n * {"s": 1, "m": 60, "h": 3600, "d": 86400}[unit]
+    m = re.fullmatch(r"([01]?\d|2[0-3])[:.]([0-5]\d)", when)
+    if m:
+        now = _dt.datetime.now()
+        target = now.replace(hour=int(m.group(1)), minute=int(m.group(2)), second=0, microsecond=0)
+        if target <= now:
+            target += _dt.timedelta(days=1)
+        return int((target - now).total_seconds())
+    return None
+
+async def _alarm_worker(gid: int, aid: int, delay: int, channel, mention: str, text: str):
+    try:
+        await asyncio.sleep(delay)
+    except asyncio.CancelledError:
+        return
+    lst = alarms.get(gid, [])
+    job = next((a for a in lst if a["id"] == aid), None)
+    if job is None:
+        return
+    lst.remove(job)
+    try:
+        await channel.send(f"⏰ **ALARM** {mention}\n{text}")
+    except Exception as e:
+        print(f"alarm kirim gagal: {e}")
+
+@bot.command(name="alarm")
+@is_allowed_guild()
+async def alarm_set(ctx, waktu: str, *, pesan: str = "Waktunya!"):
+    """!alarm 10m <pesan> — atau !alarm 20:00 <pesan>"""
+    delay = _parse_alarm(waktu)
+    if delay is None or delay < 5:
+        await ctx.send("Format salah bre. Contoh: `!alarm 10m makan` / `!alarm 1h nobar` / `!alarm 20:00 tidur` (min 5 detik).")
+        return
+    gid = ctx.guild.id
+    _alarm_id[gid] = _alarm_id.get(gid, 0) + 1
+    aid = _alarm_id[gid]
+    task = bot.loop.create_task(_alarm_worker(gid, aid, delay, ctx.channel, ctx.author.mention, pesan))
+    alarms.setdefault(gid, []).append({"id": aid, "task": task, "at": time.time() + delay, "text": pesan, "by": ctx.author.display_name})
+    if delay >= 3600:
+        pretty = f"{delay//3600} jam {(delay%3600)//60} mnt"
+    elif delay >= 60:
+        pretty = f"{delay//60} mnt"
+    else:
+        pretty = f"{delay} dtk"
+    await ctx.send(f"⏰ Oke, alarm #{aid} bunyi {pretty} lagi: **{pesan}**")
+
+@bot.command(name="alarmlist")
+@is_allowed_guild()
+async def alarm_list(ctx):
+    lst = alarms.get(ctx.guild.id, [])
+    if not lst:
+        await ctx.send("Nggak ada alarm aktif. Pasang `!alarm 10m <pesan>`.")
+        return
+    now = time.time()
+    lines = []
+    for a in lst:
+        sisa = max(0, int(a["at"] - now))
+        h, m, s = sisa // 3600, (sisa % 3600) // 60, sisa % 60
+        pretty = f"{h}j {m}m" if h else (f"{m}m {s}d" if m else f"{s}d")
+        lines.append(f"#{a['id']} ({pretty} lagi) — {a['text']} — by {a['by']}")
+    await ctx.send("⏰ **Alarm aktif:**\n" + "\n".join(lines))
+
+@bot.command(name="alarmbatal")
+@is_allowed_guild()
+async def alarm_cancel(ctx, aid: int):
+    lst = alarms.get(ctx.guild.id, [])
+    job = next((a for a in lst if a["id"] == aid), None)
+    if not job:
+        await ctx.send(f"Alarm #{aid} nggak ada. Cek `!alarmlist`.")
+        return
+    job["task"].cancel()
+    lst.remove(job)
+    await ctx.send(f"🗑️ Alarm #{aid} dibatalin.")
+
 # ===== 6. TEBAK GAMBAR (pixel co-op berdua) =====
 try:
     import gambar_assets
