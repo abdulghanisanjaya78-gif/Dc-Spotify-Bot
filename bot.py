@@ -1205,6 +1205,7 @@ async def games_list(ctx):
         "5. 💣 Bomb Defusal — `!bomb @temen` → `!bombaccept` → `!cut <nomor>`\n"
         "6. 🔤 Tebak Kata — `!tebakkata` → `!tebak <huruf/kata>` → `!hint` / `!nyerah`\n"
         "7. 🖼️ Tebak Gambar — `!tebakgambar` → `!jg <jawaban>` → `!bocoran` / `!stopgambar`\n"
+        "8. ⏰ Alarm — `!alarm 10m <pesan>` / `!alarmlist` / `!alarmbatal <id>`\n"
         "Ketik `!rules <musik|quiz|tod|mind|bomb|kata|gambar>` buat aturan lengkap."
     )
 
